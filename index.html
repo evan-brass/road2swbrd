@@ -25,16 +25,29 @@
 		}
 		async #signaling_task(remote_desc) {
 			if (remote_desc) {
-				await this.setRemoteDescription(remote_desc);
+				await this.setRemoteDescription(this.#expand(remote_desc));
 			}
 			await this.setLocalDescription();
 			while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
-			this.#local_res(this.localDescription);
+			const local = this.#collapse(this.localDescription);
+			this.#local_res(local);
 
 			if (this.signalingState == 'have-local-offer') {
 				remote_desc = await this.#remote;
-				await this.setRemoteDescription(remote_desc);
+				await this.setRemoteDescription(this.#expand(remote_desc));
 			}
+		}
+		#collapse({type, sdp}) {
+			const {1: ice_ufrag} = /^a=ice-ufrag:(.+)/im.exec(sdp);
+			const {1: ice_pwd} = /^a=ice-pwd:(.+)/im.exec(sdp);
+			const {1: fingerprint} = /^a=fingerprint:sha-256 (.+)/im.exec(sdp);
+			const candidates = Array.from(sdp.matchAll(/^a=candidate:(.+)/igm), ({ 1: candidate}) => candidate);
+			const id = btoa(String.fromCharCode(...fingerprint.split(':').map(s => parseInt(s, 16))));
+
+			return {type, sdp, ice_ufrag, ice_pwd, id, candidates};
+		}
+		#expand({type, sdp}) {
+			return {type, sdp}
 		}
 	}
 
