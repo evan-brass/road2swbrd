@@ -1,17 +1,47 @@
-const a = new RTCPeerConnection();
-const dc = a.createDataChannel('');
-dc.addEventListener('open', () => console.log('Connected!'));
+const default_config = {
+    iceServers: [
+        {urls: 'stun:global.stun.twilio.com'},
+    ]
+}
+class Conn extends RTCPeerConnection {
+    #dc = this.createDataChannel('', {negotiated: true, id: 0});
+    constructor(config = null, remote_desc) {
+        super({ ...default_config, ...config });
+        this.#dc.addEventListener('open', () => console.log('Connected!'));
 
-await a.setLocalDescription();
-while (a.iceGatheringState != 'complete') {
-    await new Promise(res => a.addEventListener('icegatheringstatechange', res, {once: true}));
+        this.#signaling_task(remote_desc);
+    }
+    
+    #local_res;
+    #local = new Promise(res => this.#local_res = res);
+    get local() { return this.#local; }
+
+    #remote_res;
+    #remote = new Promise(res => this.#remote_res = res);
+    set remote(desc) { this.#remote_res(desc); }
+    
+    async #signaling_task(remote_desc) {
+        if (remote_desc) {
+            await this.setRemoteDescription(remote_desc);
+        }
+
+        await this.setLocalDescription();
+        while (this.iceGatheringState != 'complete') {
+            await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
+        }
+        this.#local_res(this.localDescription);
+
+        if (!remote_desc) {
+            const remote = await this.#remote;
+            await this.setRemoteDescription(remote);
+        }
+    }
 }
 
-const b = new RTCPeerConnection();
-await b.setRemoteDescription(a.localDescription);
-await b.setLocalDescription();
-while (b.iceGatheringState != 'complete') {
-    await new Promise(res => b.addEventListener('icegatheringstatechange', res, {once: true}));
-}
+const a = new Conn();
+const siga = await a.local;
 
-await a.setRemoteDescription(b.localDescription);
+const b = new Conn(null, siga);
+const sigb = await b.local;
+
+a.remote = sigb;
