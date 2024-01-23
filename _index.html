@@ -1,5 +1,5 @@
 <script type="module">
-const a = new RTCPeerConnection();
+const a = new RTCPeerConnection({ iceServers: [{urls: 'stun:global.stun.twilio.com' }]});
 
 const dc = a.createDataChannel('');
 dc.addEventListener('open', () => console.log('connected!'));
@@ -24,7 +24,14 @@ function collapse({sdp, type}) {
 	const { 1: ice_pwd } = /a=ice-pwd:(.+)/i.exec(sdp);
 	const { 1: fingerprint } = /a=fingerprint:sha-256 (.+)/i.exec(sdp);
 	const id = btoa(String.fromCharCode(...fingerprint.split(':').map(s => parseInt(s, 16))));
-	const candidates = Array.from(sdp.matchAll(/a=candidate:(.+)/ig), ({ 1: candidate }) => candidate);
+	const candidates = Array.from(
+		sdp.matchAll(/a=candidate:([^ ]+) ([0-9]+) (udp|tcp) ([0-9]+) ([^ ]+) ([0-9]+) typ (host|srflx|relay)/ig),
+		([_full, _foundation, _component, transport, priority, address, port, type]) => ({
+			transport, priority: parseInt(priority), address, port: parseInt(port), type
+		})
+	);
+	// Sort the candidates by priority
+	candidates.sort(({priority: a}, {priority: b}) => b - a);
 
 	return {ice_ufrag, ice_pwd, id, candidates, type};
 }
@@ -40,7 +47,9 @@ function expand({ice_ufrag, ice_pwd, id, candidates, type}) {
 		// 'a=msid-semantic: WMS',
 		'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
 		'c=IN IP4 0.0.0.0',
-		...candidates.map(c => 'a=candidate:' + c),
+		...candidates.map(({transport, priority, address, port, type}, i) => {
+			return `a=candidate:foundation 1 ${transport || 'udp'} ${priority || (candidates.length - i)} ${address} ${port} typ ${type || 'host'}${transport == 'tcp' ? ' tcptype passive' : ''}`
+		}),
 		`a=ice-ufrag:${ice_ufrag}`,
 		`a=ice-pwd:${ice_pwd}`,
 		`a=fingerprint:sha-256 ${fingerprint}`,
