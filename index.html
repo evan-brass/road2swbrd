@@ -6,14 +6,14 @@
 		]
 	};
 	class Conn extends RTCPeerConnection {
+		#dc = this.createDataChannel('_', { negotiated: true, id: 0 })
 		constructor(config = null) {
 			super({ ...default_config, ...config });
+			this.#dc.addEventListener('open', () => console.log('Connected!'));
 		}
 	}
 
 	const a = new Conn();
-	const dc = a.createDataChannel('_');
-	dc.addEventListener('open', () => console.log('Connected!'));
 
 	await a.setLocalDescription();
 	while (a.iceGatheringState != 'complete') await new Promise(res => a.addEventListener('icegatheringstatechange', res, {once: true}));
