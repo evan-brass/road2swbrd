@@ -7,21 +7,43 @@
 	};
 	class Conn extends RTCPeerConnection {
 		#dc = this.createDataChannel('_', { negotiated: true, id: 0 })
-		constructor(config = null) {
+		constructor(config = null, remote_desc) {
 			super({ ...default_config, ...config });
 			this.#dc.addEventListener('open', () => console.log('Connected!'));
+
+			this.#signaling_task(remote_desc);
+		}
+		#local_res;
+		#local = new Promise(res => this.#local_res = res);
+		get local() {
+			return this.#local;
+		}
+		#remote_res;
+		#remote = new Promise(res => this.#remote_res = res);
+		set remote(description) {
+			this.#remote_res(description);
+		}
+		async #signaling_task(remote_desc) {
+			if (remote_desc) {
+				await this.setRemoteDescription(remote_desc);
+			}
+			await this.setLocalDescription();
+			while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
+			this.#local_res(this.localDescription);
+
+			if (this.signalingState == 'have-local-offer') {
+				remote_desc = await this.#remote;
+				await this.setRemoteDescription(remote_desc);
+			}
 		}
 	}
 
 	const a = new Conn();
+	const siga = await a.local;
+	console.log(siga);
 
-	await a.setLocalDescription();
-	while (a.iceGatheringState != 'complete') await new Promise(res => a.addEventListener('icegatheringstatechange', res, {once: true}));
-	
-	const b = new Conn();
-	await b.setRemoteDescription(a.localDescription);
-	await b.setLocalDescription();
-	while (b.iceGatheringState != 'complete') await new Promise(res => b.addEventListener('icegatheringstatechange', res, {once: true}));
-
-	await a.setRemoteDescription(b.localDescription);
+	const b = new Conn(null, siga);
+	const sigb = await b.local;
+	console.log(sigb);
+	a.remote = sigb;
 </script>
