@@ -1,12 +1,24 @@
 <script type="module">
-	const a = new RTCPeerConnection();
+	const default_config = {
+		iceServers: [
+			{ urls: 'stun:global.stun.twilio.com' },
+			{ urls: 'stun:stun.l.google.com:19302' }
+		]
+	};
+	class Conn extends RTCPeerConnection {
+		constructor(config = null) {
+			super({ ...default_config, ...config });
+		}
+	}
+
+	const a = new Conn();
 	const dc = a.createDataChannel('_');
 	dc.addEventListener('open', () => console.log('Connected!'));
 
 	await a.setLocalDescription();
 	while (a.iceGatheringState != 'complete') await new Promise(res => a.addEventListener('icegatheringstatechange', res, {once: true}));
 	
-	const b = new RTCPeerConnection();
+	const b = new Conn();
 	await b.setRemoteDescription(a.localDescription);
 	await b.setLocalDescription();
 	while (b.iceGatheringState != 'complete') await new Promise(res => b.addEventListener('icegatheringstatechange', res, {once: true}));
