@@ -18,7 +18,11 @@ class Id {
         return new this({ value: atob(b64) });
     }
     [Symbol.toPrimitive](hint) {
-        return this.#hex().join(':');
+        if (hint == 'number') {
+            return BigInt('0x' + this.#hex().join(''));
+        } else {
+            return this.#hex().join(':');
+        }
     }
 }
 
@@ -29,11 +33,11 @@ const default_config = {
 }
 class Conn extends RTCPeerConnection {
     #dc = this.createDataChannel('', {negotiated: true, id: 0});
-    constructor(config = null, remote_desc) {
+    constructor(config = null) {
         super({ ...default_config, ...config });
         this.#dc.addEventListener('open', () => console.log('Connected!'));
 
-        this.#signaling_task(remote_desc);
+        this.#signaling_task();
     }
     
     #local_res;
@@ -44,21 +48,18 @@ class Conn extends RTCPeerConnection {
     #remote = new Promise(res => this.#remote_res = res);
     set remote(desc) { this.#remote_res(desc); }
     
-    async #signaling_task(remote_desc) {
-        if (remote_desc) {
-            await this.setRemoteDescription(this.#expand(remote_desc));
-        }
-
-        await this.setLocalDescription();
+    async #signaling_task() {
+        await super.setLocalDescription();
         while (this.iceGatheringState != 'complete') {
             await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
         }
-        this.#local_res(this.#collapse(this.localDescription));
+        const local = this.#collapse(this.localDescription);
+        this.#local_res(local);
 
-        if (!remote_desc) {
-            const remote = await this.#remote;
-            await this.setRemoteDescription(this.#expand(remote));
-        }
+        const remote = await this.#remote;
+        const polite = local.id < remote.id;
+        
+        await super.setRemoteDescription(this.#expand(remote, polite));
     }
 
     #collapse({sdp, type}) {
@@ -73,9 +74,9 @@ class Conn extends RTCPeerConnection {
         const id = new Id(fingerprint);
 
 
-        return {type, ice_ufrag, ice_pwd, id, setup, candidates};
+        return {ice_ufrag, ice_pwd, id, candidates};
     }
-    #expand({type, ice_ufrag, ice_pwd, id, setup, candidates}) {
+    #expand({ice_ufrag, ice_pwd, id, setup, candidates}, polite) {
         const fingerprint = String(id);
         const sdp = [
             'v=0',
@@ -92,22 +93,24 @@ class Conn extends RTCPeerConnection {
             `a=ice-pwd:${ice_pwd}`,
             // 'a=ice-options:trickle',
             `a=fingerprint:sha-256 ${fingerprint}`,
-            `a=setup:${setup}`,
+            `a=setup:${setup || polite ? 'passive' : 'active'}`,
             // 'a=mid:0',
             'a=sctp-port:5000',
             // 'a=max-message-size:262144',
             ''
         ].join('\n');
-        return {sdp, type};
+        return {sdp, type: 'answer'};
     }
+    setLocalDescription() { throw new Error("Manual signaling disabled."); }
+    setRemoteDescription() { throw new Error("Manual signaling disabled."); }
+    createOffer() { throw new Error("Manual signaling disabled."); }
+    createAnswer() { throw new Error("Manual signaling disabled."); }
 }
 
 const a = new Conn();
-const siga = await a.local;
+const b = new Conn();
+const [siga, sigb] = await Promise.all([a.local, b.local]);
 console.log(siga);
-
-const b = new Conn(null, siga);
-const sigb = await b.local;
 console.log(sigb);
-
 a.remote = sigb;
+b.remote = siga;
