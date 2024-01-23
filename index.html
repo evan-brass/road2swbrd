@@ -7,11 +7,11 @@
 	};
 	class Conn extends RTCPeerConnection {
 		#dc = this.createDataChannel('_', { negotiated: true, id: 0 })
-		constructor(config = null, remote_desc) {
+		constructor(config = null) {
 			super({ ...default_config, ...config });
 			this.#dc.addEventListener('open', () => console.log('Connected!'));
 
-			this.#signaling_task(remote_desc);
+			this.#signaling_task();
 		}
 		#local_res;
 		#local = new Promise(res => this.#local_res = res);
@@ -23,19 +23,14 @@
 		set remote(description) {
 			this.#remote_res(description);
 		}
-		async #signaling_task(remote_desc) {
-			if (remote_desc) {
-				await this.setRemoteDescription(this.#expand(remote_desc));
-			}
+		async #signaling_task() {
 			await this.setLocalDescription();
 			while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
 			const local = this.#collapse(this.localDescription);
 			this.#local_res(local);
 
-			if (this.signalingState == 'have-local-offer') {
-				remote_desc = await this.#remote;
-				await this.setRemoteDescription(this.#expand(remote_desc));
-			}
+			const remote_desc = await this.#remote;
+			await this.setRemoteDescription(this.#expand(remote_desc, local.id));
 		}
 		#collapse({type, sdp}) {
 			const {1: ice_ufrag} = /^a=ice-ufrag:(.+)/im.exec(sdp);
@@ -44,10 +39,16 @@
 			const candidates = Array.from(sdp.matchAll(/^a=candidate:(.+)/igm), ({ 1: candidate}) => candidate);
 			const id = btoa(String.fromCharCode(...fingerprint.split(':').map(s => parseInt(s, 16))));
 
-			return {type, ice_ufrag, ice_pwd, id, candidates};
+			return {ice_ufrag, ice_pwd, id, candidates};
 		}
-		#expand({type, ice_ufrag, ice_pwd, id, candidates}) {
-			const fingerprint = Array.from(atob(id), c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(':');
+		#expand({ice_ufrag, ice_pwd, id, candidates}, local_id) {
+			const hex_local = Array.from(atob(local_id), c => c.charCodeAt(0).toString(16).padStart(2, '0'));
+			const hex_remote = Array.from(atob(id), c => c.charCodeAt(0).toString(16).padStart(2, '0'));
+			const localnum = BigInt('0x' + hex_local.join(''));
+			const remotenum = BigInt('0x' + hex_remote.join(''));
+			const polite = localnum < remotenum;
+
+			const fingerprint = hex_remote.join(':');
 			const sdp = [
 				'v=0',
 				'o=- 2914999304198734631 2 IN IP4 127.0.0.1',
@@ -59,20 +60,20 @@
 				`a=ice-ufrag:${ice_ufrag}`,
 				`a=ice-pwd:${ice_pwd}`,
 				`a=fingerprint:sha-256 ${fingerprint}`,
-				`a=setup:${type == 'offer' ? 'actpass' : 'active'}`,
+				`a=setup:${polite ? 'passive' : 'active'}`,
 				'a=sctp-port:5000',
 				'',
 			].join('\n');
-			return {type, sdp};
+			return {type: 'answer', sdp};
 		}
 	}
 
 	const a = new Conn();
-	const siga = await a.local;
+	const b = new Conn();
+	
+	const [siga, sigb] = await Promise.all([a.local, b.local]);
 	console.log(siga);
-
-	const b = new Conn(null, siga);
-	const sigb = await b.local;
 	console.log(sigb);
 	a.remote = sigb;
+	b.remote = siga;
 </script>
