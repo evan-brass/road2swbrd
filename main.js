@@ -71,8 +71,8 @@ class Id {
 
 class Sig {
 	id;
-	ice_pwd;
 	candidates;
+	// ice_pwd;
 	// ice_ufrag;
 	// setup;
 	// ice_lite;
@@ -122,9 +122,11 @@ const config_default = {
 	iceServers: [{urls: 'stun:global.stun.twilio.com'}]
 };
 class Conn extends RTCPeerConnection {
+	#config;
 	#dc = this.createDataChannel('', {negotiated: true, id: 0});
 	constructor(config = null, remote_desc) {
 		super({ ...config_default, ...config});
+		this.#config = config;
 		this.#dc.addEventListener('open', () => console.log('Connected!'));
 		this.#signaling_task(remote_desc);
 	}
@@ -157,10 +159,12 @@ class Conn extends RTCPeerConnection {
 		const local_id = new Id();
 		local_id.add_sdp(offer.sdp);
 		offer.sdp = offer.sdp.replace(/^a=ice-ufrag:(.+)/im, 'a=ice-ufrag:' + local_id);
+		const ice_pwd = this.#config?.ice_pwd || 'the/ice/password/constant';
+		offer.sdp = offer.sdp.replace(/^a=ice-pwd:(.+)/im, 'a=ice-pwd:' + ice_pwd);
 		await super.setLocalDescription(offer);
 
 		while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
-		const local = new Sig({ id: local_id, ice_ufrag: '' });
+		const local = new Sig({ id: local_id, ice_ufrag: '', ice_pwd: this.#config?.ice_pwd ?? '' });
 		local.add_sdp(this.localDescription.sdp);
 		this.#local_res(local);
 
