@@ -1,12 +1,47 @@
+class Id {
+	constructor(init) {
+		if (typeof init == 'string') {
+			this['sha-256'] = init;
+		} else {
+			Object.assign(this, ...arguments);
+		}
+	}
+	add_sdp(sdp) {
+		for (const {1: alg, 2: value} of sdp.matchAll(/^a=fingerprint:(sha-256) (.+)/img)) {
+			const binstr = String.fromCharCode(...value.split(':').map(s => parseInt(s, 16)));
+			this[alg] = btoa(binstr).replace('=', '');
+		}
+	}
+	#hex(alg) {
+		let b64 = this[alg];
+		while (b64.length % 4) b64 += '=';
+		const binstr = atob(b64);
+		return Array.from(binstr, c => c.charCodeAt(0).toString(16).padStart(2, '0'));
+	}
+	*sdp() {
+		for (const alg in this) {
+			yield `a=fingerprint:${alg} ${this.#hex(alg).join(':')}`;
+		}
+	}
+	[Symbol.toPrimitive](hint) {
+		if (hint == 'number') {
+			return BigInt('0x' + this.#hex('sha-256').join(''));
+		} else {
+			return this['sha-256'];
+		}
+	}
+}
+
 class Sig {
-	fingerprint256;
+	id;
 	ice_ufrag;
 	ice_pwd;
 	candidates;
 	setup;
 	constructor() { Object.assign(this, ...arguments); }
 	add_sdp(sdp) {
-		this.fingerprint256 ??= /^a=fingerprint:sha-256 (.+)/im.exec(sdp)[1];
+		this.id ??= new Id();
+		this.id.add_sdp(sdp);
 		this.ice_ufrag ??= /^a=ice-ufrag:(.+)/im.exec(sdp)[1];
 		this.ice_pwd ??= /^a=ice-pwd:(.+)/im.exec(sdp)[1];
 		this.candidates ??= Array.from(
@@ -16,7 +51,7 @@ class Sig {
 		this.setup ??= /^a=setup:(.+)/im.exec(sdp)[1];
 	}
 	*sdp(_polite) {
-		yield 'a=fingerprint:sha-256 ' + this.fingerprint256;
+		yield* this.id.sdp();
 		yield 'a=ice-ufrag:' + this.ice_ufrag;
 		yield 'a=ice-pwd:' + this.ice_pwd;
 		for (const candidate of this.candidates) {
