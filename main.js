@@ -45,17 +45,33 @@ class Sig {
 		this.ice_ufrag ??= /^a=ice-ufrag:(.+)/im.exec(sdp)[1];
 		this.ice_pwd ??= /^a=ice-pwd:(.+)/im.exec(sdp)[1];
 		this.candidates ??= Array.from(
-			sdp.matchAll(/^a=candidate:(.+)/img),
-			({1: candidate}) => candidate
+			sdp.matchAll(/^a=candidate:([^ ]+) ([0-9]+) (udp) ([0-9]+) ([^ ]+) ([0-9]+) typ (host|srflx|relay)/img),
+			([_fm, foundation, component, transport, priority, address, port, type]) => {
+				return {foundation, component, transport, priority: parseInt(priority), address, port: parseInt(port), type}
+			}
 		);
+		this.candidates.sort(({priority: a}, {priority: b}) => b - a);
 		this.setup ??= /^a=setup:(.+)/im.exec(sdp)[1];
 	}
 	*sdp(_polite) {
 		yield* this.id.sdp();
 		yield 'a=ice-ufrag:' + this.ice_ufrag;
 		yield 'a=ice-pwd:' + this.ice_pwd;
-		for (const candidate of this.candidates) {
-			yield 'a=candidate:' + candidate;
+		for (let i = 0; i < this.candidates.length; ++i) {
+			const candidate = this.candidates[i];
+			if (typeof candidate == 'string') yield 'a=candidate:' + candidate;
+			else if (typeof candidate == 'object') {
+				const {
+					foundation = 'foundation',
+					component = '1',
+					transport = 'udp',
+					priority = this.candidates.length - i,
+					address,
+					port = 3478,
+					type = 'host'
+				} = candidate;
+				yield `a=candidate:${foundation} ${component} ${transport} ${priority} ${address} ${port} typ ${type}`;
+			}
 		}
 		if (this.setup) yield 'a=setup:' + this.setup;
 	}
