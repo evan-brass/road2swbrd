@@ -173,19 +173,52 @@ class Conn extends RTCPeerConnection {
 		await super.setRemoteDescription(this.#desc(remote, polite));
 	}
 }
+const cert = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' });
 const config = {
 	iceTransportPolicy: 'relay',
-	iceServers: [{ urls: 'turn:127.0.0.1?transport=tcp', username: 'the/turn/username/constant', credential: 'the/turn/credential/constant' }]
+	iceServers: [{ urls: 'turn:127.0.0.1?transport=tcp', username: 'the/turn/username/constant', credential: 'the/turn/credential/constant' }],
+	certificates: [cert]
 };
-const a = new Conn(config);
-const b = new Conn(config);
-const siga = await a.local;
-const sigb = await b.local;
-siga.candidates = sigb.candidates = [
-	{address: '255.255.255.255', port: 4666} // Whatever the super broadcast address is.
+const fork = new Conn(config);
+const fork_sig = await fork.local;
+fork_sig.setup = 'active';
+fork_sig.candidates = [
+	{address: '255.255.255.255', port: 4666, type: 'host'}
 ];
-console.log(siga);
-console.log(sigb);
+console.log(fork_sig);
 
-a.remote = sigb;
-b.remote = siga;
+const answered = new Set();
+setInterval(async () => {
+	const stats = await fork.getStats();
+	for (const dict of stats.values()) {
+		const {type, port, usernameFragment } = dict;
+		if (type != 'remote-candidate' || !usernameFragment) continue;
+		if (answered.has(usernameFragment)) continue;
+		
+		console.log('answering', usernameFragment);
+		const answer = new Conn(config);
+		answered.add(usernameFragment);
+		answer.addEventListener('close', () => answered.delete(usernameFragment));
+		
+		answer.remote = new Sig({
+			id: new Id(usernameFragment),
+			candidates: [
+				{address: '255.255.255.255', port: port || 4666, type: 'host'}
+			],
+			setup: 'passive'
+		});
+	}
+}, 1000);
+
+const incoming = new Conn({...config, certificates: []});
+incoming.remote = fork_sig;
+
+
+// const a = new Conn();
+// const b = new Conn();
+// const siga = await a.local;
+// const sigb = await b.local;
+// console.log(siga);
+// console.log(sigb);
+// a.remote = sigb;
+// b.remote = siga;
