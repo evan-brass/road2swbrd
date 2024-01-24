@@ -181,7 +181,9 @@ const a = new Conn(config);
 const b = new Conn(config);
 const siga = await a.local;
 const sigb = await b.local;
-[...siga.candidates, ...sigb.candidates].forEach(c => c.address = '255.255.255.255');
+siga.candidates = sigb.candidates = [
+	{address: '255.255.255.255', port: 4666} // Whatever the super broadcast address is.
+];
 console.log(siga);
 console.log(sigb);
 
