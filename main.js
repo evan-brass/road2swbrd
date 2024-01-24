@@ -8,6 +8,7 @@ class Id {
 	}
 	add_sdp(sdp) {
 		for (const {1: alg, 2: value} of sdp.matchAll(/^a=fingerprint:(sha-256) (.+)/img)) {
+			if (alg in this) continue;
 			const binstr = String.fromCharCode(...value.split(':').map(s => parseInt(s, 16)));
 			this[alg] = btoa(binstr).replace('=', '');
 		}
@@ -34,9 +35,9 @@ class Id {
 
 class Sig {
 	id;
-	ice_ufrag;
 	ice_pwd;
 	candidates;
+	// ice_ufrag;
 	// setup;
 	constructor() { Object.assign(this, ...arguments); }
 	add_sdp(sdp) {
@@ -54,8 +55,10 @@ class Sig {
 	}
 	*sdp(polite) {
 		yield* this.id.sdp();
-		yield 'a=ice-ufrag:' + this.ice_ufrag;
-		yield 'a=ice-pwd:' + this.ice_pwd;
+		const ice_ufrag = this.ice_ufrag || String(this.id);
+		yield 'a=ice-ufrag:' + ice_ufrag;
+		const ice_pwd = this.ice_pwd || 'the/ice/password/constant';
+		yield 'a=ice-pwd:' + ice_pwd;
 		for (let i = 0; i < this.candidates.length; ++i) {
 			const candidate = this.candidates[i];
 			if (typeof candidate == 'string') yield 'a=candidate:' + candidate;
@@ -112,9 +115,14 @@ class Conn extends RTCPeerConnection {
 		return {type, sdp};
 	}
 	async #signaling_task() {
-		await super.setLocalDescription();
+		const offer = await this.createOffer();
+		const local_id = new Id();
+		local_id.add_sdp(offer.sdp);
+		offer.sdp = offer.sdp.replace(/^a=ice-ufrag:(.+)/im, 'a=ice-ufrag:' + local_id);
+		await super.setLocalDescription(offer);
+
 		while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
-		const local = new Sig();
+		const local = new Sig({ id: local_id, ice_ufrag: '' });
 		local.add_sdp(this.localDescription.sdp);
 		this.#local_res(local);
 
