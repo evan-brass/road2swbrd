@@ -1,3 +1,39 @@
+/**
+ * Example Addr-esses:
+ * const conn = new Addr('udp:eSfQhc2igaaF_yILi4avPLmpeI6ffxOLB6jr-hvFTJs@example.com').connect();
+ */
+class Addr extends URL {
+	#authority() {
+		// Use two URLS to unhide default ports: new URL('https://test.com:443').port == '' and new URL('http://test.com:80').port == ''
+		const http = new URL(this); http.protocol = 'http:';
+		const https = new URL(this); https.protocol = 'https:';
+		const host = (http.host.length < https.host.length) ? https.host : http.host;
+		const port = parseInt(http.port || https.port || 3478);
+		return { username: http.username, password: http.password, hostname: http.hostname, host, port };
+	}
+	connect(config = null) {
+		const ret = new Conn(config);
+		if (this.protocol == 'udp:') {
+			const {hostname: address, port, username, password: ice_pwd} = this.#authority();
+			// TODO: If you want, you could remove the username and use DoH to store the fingerprint in a TXT DNS entry.
+			const id = new Id(username.replace(/_/g, '/').replace(/-/, '+')); // Convert the username from url-base64-no-pad to base64-no-pad
+			ret.remote = new Sig({
+				id,
+				ice_pwd,
+				candidates: [
+					{address, port, type: 'host'}
+				],
+				setup: 'passive',
+				ice_lite: true
+			});
+		}
+		else {
+			ret.close();
+		}
+		return ret;
+	}
+}
+
 class Id {
 	constructor(init) {
 		if (typeof init == 'string') {
@@ -39,6 +75,7 @@ class Sig {
 	candidates;
 	// ice_ufrag;
 	// setup;
+	// ice_lite;
 	constructor() { Object.assign(this, ...arguments); }
 	add_sdp(sdp) {
 		this.id ??= new Id();
@@ -59,6 +96,7 @@ class Sig {
 		yield 'a=ice-ufrag:' + ice_ufrag;
 		const ice_pwd = this.ice_pwd || 'the/ice/password/constant';
 		yield 'a=ice-pwd:' + ice_pwd;
+		if (this.ice_lite) yield 'a=ice-lite';
 		for (let i = 0; i < this.candidates.length; ++i) {
 			const candidate = this.candidates[i];
 			if (typeof candidate == 'string') yield 'a=candidate:' + candidate;
