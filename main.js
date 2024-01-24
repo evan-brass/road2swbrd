@@ -37,7 +37,7 @@ class Sig {
 	ice_ufrag;
 	ice_pwd;
 	candidates;
-	setup;
+	// setup;
 	constructor() { Object.assign(this, ...arguments); }
 	add_sdp(sdp) {
 		this.id ??= new Id();
@@ -51,9 +51,8 @@ class Sig {
 			}
 		);
 		this.candidates.sort(({priority: a}, {priority: b}) => b - a);
-		this.setup ??= /^a=setup:(.+)/im.exec(sdp)[1];
 	}
-	*sdp(_polite) {
+	*sdp(polite) {
 		yield* this.id.sdp();
 		yield 'a=ice-ufrag:' + this.ice_ufrag;
 		yield 'a=ice-pwd:' + this.ice_pwd;
@@ -73,7 +72,8 @@ class Sig {
 				yield `a=candidate:${foundation} ${component} ${transport} ${priority} ${address} ${port} typ ${type}`;
 			}
 		}
-		if (this.setup) yield 'a=setup:' + this.setup;
+		const setup = this.setup ?? (polite ? 'passive' : 'active');
+		yield 'a=setup:' + setup;
 	}
 }
 
@@ -96,7 +96,7 @@ class Conn extends RTCPeerConnection {
 	#remote = new Promise(res => this.#remote_res = res);
 	set remote(remote_desc) { this.#remote_res(remote_desc); }
 
-	#desc(sig) {
+	#desc(sig, polite) {
 		const sdp = [
 			'v=0',
 			'o=WebRTC-with-addresses 42 0 IN IP4 0.0.0.0',
@@ -105,7 +105,7 @@ class Conn extends RTCPeerConnection {
 			'm=application 42 UDP/DTLS/SCTP webrtc-datachannel',
 			'c=IN IP4 0.0.0.0',
 			'a=sctp-port:5000',
-			...sig.sdp(),
+			...sig.sdp(polite),
 			''
 		].join('\n');
 		const type = (this.signalingState == 'have-local-offer') ? 'answer' : 'offer';
@@ -119,7 +119,8 @@ class Conn extends RTCPeerConnection {
 		this.#local_res(local);
 
 		const remote = await this.#remote;
-		await super.setRemoteDescription(this.#desc(remote));
+		const polite = local.id < remote.id;
+		await super.setRemoteDescription(this.#desc(remote, polite));
 	}
 }
 
@@ -129,8 +130,6 @@ const siga = await a.local;
 const sigb = await b.local;
 console.log(siga);
 console.log(sigb);
-siga.setup = 'passive';
-sigb.setup = 'active';
 
 a.remote = sigb;
 b.remote = siga;
