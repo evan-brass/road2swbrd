@@ -49,7 +49,12 @@ class Conn extends RTCPeerConnection {
     set remote(desc) { this.#remote_res(desc); }
     
     async #signaling_task() {
-        await super.setLocalDescription();
+        const offer = await super.createOffer();
+        const {1: fingerprint} = /^a=fingerprint:sha-256 (.+)/im.exec(offer.sdp);
+        const local_id = new Id(fingerprint);
+        offer.sdp = offer.sdp.replace(/^a=ice-ufrag:.+/im, 'a=ice-ufrag:' + local_id.to_b64().replace('=', ''));
+        offer.sdp = offer.sdp.replace(/^a=ice-pwd:.+/im, 'a=ice-pwd:the/ice/password/constant');
+        await super.setLocalDescription(offer);
         while (this.iceGatheringState != 'complete') {
             await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
         }
@@ -57,46 +62,44 @@ class Conn extends RTCPeerConnection {
         this.#local_res(local);
 
         const remote = await this.#remote;
-        const polite = local.id < remote.id;
+        const polite = local_id < remote.id;
         
         await super.setRemoteDescription(this.#expand(remote, polite));
     }
 
     #collapse({sdp, type}) {
-        const {1: ice_ufrag} = /^a=ice-ufrag:(.+)/im.exec(sdp);
-        const {1: ice_pwd} = /^a=ice-pwd:(.+)/im.exec(sdp);
         const {1: fingerprint} = /^a=fingerprint:sha-256 (.+)/im.exec(sdp);
-        const {1: setup} = /^a=setup:(.+)/im.exec(sdp);
         const candidates = Array.from(
-            sdp.matchAll(/^a=candidate:(.+)/img),
-            ({1: candidate}) => candidate
+            sdp.matchAll(/^a=candidate:([^ ]) ([0-9]+) ([0-9]+) (udp|tcp) ([^ ]) ([0-9]+) typ (host|srflx|relay)/img),
+            ([_fullmatch, foundation, component, priority, transport, address, port, type]) => ({
+                priority: parseInt(priority),
+                transport,
+                address,
+                port: parseInt(port),
+                type
+            })
         );
         const id = new Id(fingerprint);
 
-
-        return {ice_ufrag, ice_pwd, id, candidates};
+        return {id, candidates};
     }
-    #expand({ice_ufrag, ice_pwd, id, setup, candidates}, polite) {
+    #expand({id, setup, candidates}, polite) {
+        const ice_ufrag = id.to_b64().replace('=', '');
+        const ice_pwd = 'the/ice/password/constant';
         const fingerprint = String(id);
         const sdp = [
             'v=0',
             'o=- 7859251806667725441 2 IN IP4 127.0.0.1',
             's=-',
             't=0 0',
-            // 'a=group:BUNDLE 0',
-            // 'a=extmap-allow-mixed',
-            // 'a=msid-semantic: WMS',
             'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
             'c=IN IP4 0.0.0.0',
             ...candidates.map(c => 'a=candidate:' + c),
             `a=ice-ufrag:${ice_ufrag}`,
             `a=ice-pwd:${ice_pwd}`,
-            // 'a=ice-options:trickle',
             `a=fingerprint:sha-256 ${fingerprint}`,
             `a=setup:${setup || polite ? 'passive' : 'active'}`,
-            // 'a=mid:0',
             'a=sctp-port:5000',
-            // 'a=max-message-size:262144',
             ''
         ].join('\n');
         return {sdp, type: 'answer'};
