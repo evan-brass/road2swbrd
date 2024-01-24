@@ -173,11 +173,15 @@ class Conn extends RTCPeerConnection {
 		await super.setRemoteDescription(this.#desc(remote, polite));
 	}
 }
-
-const a = new Conn();
-const b = new Conn();
+const config = {
+	iceTransportPolicy: 'relay',
+	iceServers: [{ urls: 'turn:127.0.0.1?transport=tcp', username: 'the/turn/username/constant', credential: 'the/turn/credential/constant' }]
+};
+const a = new Conn(config);
+const b = new Conn(config);
 const siga = await a.local;
 const sigb = await b.local;
+[...siga.candidates, ...sigb.candidates].forEach(c => c.address = '255.255.255.255');
 console.log(siga);
 console.log(sigb);
 
