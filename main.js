@@ -11,9 +11,24 @@ function collapse({type, sdp}) {
 		({1: candidate}) => candidate
 	);
 
-	return {type, sdp, ice_ufrag, ice_pwd, fingerprint, setup, candidates};
+	return {type, ice_ufrag, ice_pwd, fingerprint, setup, candidates};
 }
-function expand({type, sdp}) {
+function expand({type, ice_ufrag, ice_pwd, fingerprint, setup, candidates}) {
+	const sdp = [
+		'v=0',
+		'o=WebRTC-with-addresses 5736221942966321338 0 IN IP4 0.0.0.0',
+		's=-',
+		't=0 0',
+		`a=fingerprint:sha-256 ${fingerprint}`,
+		'm=application 42 UDP/DTLS/SCTP webrtc-datachannel',
+		'c=IN IP4 0.0.0.0',
+		`a=ice-ufrag:${ice_ufrag}`,
+		`a=ice-pwd:${ice_pwd}`,
+		`a=setup:${setup}`,
+		'a=sctp-port:5000',
+		...candidates.map(c => 'a=candidate:' + c),
+		'',
+	].join('\n');
 	return {type, sdp};
 }
 class Conn extends RTCPeerConnection {
