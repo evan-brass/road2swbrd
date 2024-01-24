@@ -47,7 +47,7 @@ class Sig {
 		this.candidates ??= Array.from(
 			sdp.matchAll(/^a=candidate:([^ ]+) ([0-9]+) (udp) ([0-9]+) ([^ ]+) ([0-9]+) typ (host|srflx|relay)/img),
 			([_fm, foundation, component, transport, priority, address, port, type]) => {
-				return {foundation, component, transport, priority: parseInt(priority), address, port: parseInt(port), type}
+				return {priority: parseInt(priority), address, port: parseInt(port), type}
 			}
 		);
 		this.candidates.sort(({priority: a}, {priority: b}) => b - a);
