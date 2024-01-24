@@ -60,29 +60,26 @@ class Conn extends RTCPeerConnection {
 		const type = (this.signalingState == 'have-local-offer') ? 'answer' : 'offer';
 		return {type, sdp};
 	}
-	async #signaling_task(remote) {
-		if (remote) {
-			await super.setRemoteDescription(this.#desc(remote));
-		}
+	async #signaling_task() {
 		await super.setLocalDescription();
 		while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
 		const local = new Sig();
 		local.add_sdp(this.localDescription.sdp);
 		this.#local_res(local);
 
-		if (!remote) {
-			remote = await this.#remote;
-			await super.setRemoteDescription(this.#desc(remote));
-		}
+		const remote = await this.#remote;
+		await super.setRemoteDescription(this.#desc(remote));
 	}
 }
 
 const a = new Conn();
+const b = new Conn();
 const siga = await a.local;
-console.log(siga);
-
-const b = new Conn(null, siga);
 const sigb = await b.local;
+console.log(siga);
 console.log(sigb);
+siga.setup = 'passive';
+sigb.setup = 'active';
 
 a.remote = sigb;
+b.remote = siga;
