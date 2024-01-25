@@ -1,6 +1,7 @@
 /**
  * Example Addr-esses:
  * const conn = new Addr('udp:eSfQhc2igaaF_yILi4avPLmpeI6ffxOLB6jr-hvFTJs@example.com').connect();
+ * const conn = new Addr('turn:bTKXMJ2yK94aKGWUsbQfNG2RzgG7S5vFgBd-FIzdYXQ@127.0.0.1?turn_transport=tcp').connect();
  */
 class Addr extends URL {
 	#authority() {
@@ -11,25 +12,55 @@ class Addr extends URL {
 		const port = parseInt(http.port || https.port || 3478);
 		return { username: http.username, password: http.password, hostname: http.hostname, host, port };
 	}
-	connect(config = null) {
-		const ret = new Conn(config);
-		if (this.protocol == 'udp:') {
-			const {hostname: address, port, username, password: ice_pwd} = this.#authority();
-			// TODO: If you want, you could remove the username and use DoH to store the fingerprint in a TXT DNS entry.
-			const id = new Id(username.replace(/_/g, '/').replace(/-/, '+')); // Convert the username from url-base64-no-pad to base64-no-pad
-			ret.remote = new Sig({
+	config() {
+		if (/^udp:/i.test(this.protocol)) return null;
+		else if (/^turns?:/i.test(this.protocol)) {
+			const {host} = this.#authority();
+			let transport = this.searchParams.get('turn_transport')
+			transport = (transport == 'udp') ? '' : '?transport=' + transport;
+			return {
+				iceTransportPolicy: 'relay',
+				iceServers: [{
+					urls: `${this.protocol}${host}${transport}`,
+					username: this.searchParams.get('turn_username') || 'the/turn/username/constant',
+					credential: this.searchParams.get('turn_credential') || 'the/turn/credential/constant'
+				}]
+			};
+		}
+	}
+	sig() {
+		const {username, hostname, port, password: ice_pwd} = this.#authority();
+		const id = new Id(username.replace(/_/g, '/').replace(/-/, '+')); // Convert the username from url-base64-no-pad to base64-no-pad
+		if (/^udp:/i.test(this.protocol)) {
+			return new Sig({
 				id,
 				ice_pwd,
 				candidates: [
-					{address, port, type: 'host'}
+					{address: hostname, port, type: 'host'}
 				],
 				setup: 'passive',
 				ice_lite: true
 			});
 		}
-		else {
-			ret.close();
+		else if (/^turns?:/i.test(this.protocol)) {
+			return new Sig({
+				id,
+				ice_pwd,
+				candidates: [
+					{address: '255.255.255.255', port: 4666, type: 'host'}
+				],
+				setup: 'active'
+			});
 		}
+	}
+	connect(config = null) {
+		const adjustment = this.config();
+		const ret = new Conn({...config, ...adjustment });
+
+		const sig = this.sig();
+		if (!sig) ret.close();
+		else ret.remote = sig;
+
 		return ret;
 	}
 }
@@ -180,12 +211,9 @@ const config = {
 	certificates: [cert]
 };
 const fork = new Conn(config);
-const fork_sig = await fork.local;
-fork_sig.setup = 'active';
-fork_sig.candidates = [
-	{address: '255.255.255.255', port: 4666, type: 'host'}
-];
-console.log(fork_sig);
+const username = String((await fork.local).id).replaceAll('/', '_').replaceAll('+', '-');
+const addr = new Addr(`turn:${username}@127.0.0.1?turn_transport=tcp`);
+console.log(addr.href);
 
 const answered = new Set();
 setInterval(async () => {
@@ -210,9 +238,7 @@ setInterval(async () => {
 	}
 }, 1000);
 
-const incoming = new Conn({...config, certificates: []});
-incoming.remote = fork_sig;
-
+const incoming = addr.connect();
 
 // const a = new Conn();
 // const b = new Conn();
