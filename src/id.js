@@ -1,23 +1,40 @@
+import { atob_url, btoa_url } from "./b64url.js";
+
+const untagged = new Map([
+	['sha-512', 64],
+	['sha-384', 48],
+	['sha-256', 32],
+	['sha-1',   20],
+].map(a => [a, a.toReversed()]).flat());
+
 export class Id {
-	constructor(init) {
-		if (typeof init == 'string') {
-			this['sha-256'] = init;
-		} else {
-			Object.assign(this, ...arguments);
+	['sha-256'];
+	constructor() { Object.assign(this, ...arguments); }
+	static from_str(s) {
+		const fingerprints = Object.create(null);
+		for (const value of s.split(',')) {
+			try {
+				const binstr = atob_url(value);
+				const alg = untagged.get(binstr.length);
+				if (!alg) continue;
+				fingerprints[alg] = binstr;
+			} catch {}
 		}
+		if (fingerprints['sha-256']) return new this(fingerprints);
 	}
-	add_sdp(sdp) {
-		const {1: value} = /^a=fingerprint:sha-256 (.+)/im.exec(sdp);
-		if (value) {
-			const binstr = String.fromCharCode(...value.split(':').map(s => parseInt(s, 16)));
-			this['sha-256'] = btoa(binstr).replace('=', '');
+	static from_sdp(sdp) {
+		const fingerprints = Object.create(null);
+		for (const {1: tmp, 2: value} of sdp.matchAll(/^a=fingerprint:([^ ]+) ([0-9a-f]{2}(?:\:[0-9a-f]{2})+)/img)) {
+			const alg = tmp.toLowerCase();
+			const expected_len = untagged.get(alg);
+			const bytes = value.split(':').map(s => parseInt(s, 16));
+			if (expected_len !== bytes.length || bytes.some(b => b < 0 || 255 < b)) continue;
+			fingerprints[alg] = String.fromCharCode(...bytes);
 		}
+		if (fingerprints['sha-256']) return new this(fingerprints);
 	}
 	#hex(alg) {
-		let b64 = this[alg];
-		while (b64.length % 4 != 0) b64 += '=';
-		const binstr = atob(b64);
-		return Array.from(binstr, c => c.charCodeAt(0).toString(16).padStart(2, '0'));
+		return Array.from(this[alg], c => c.charCodeAt(0).toString(16).padStart(2, '0'));
 	}
 	*sdp() {
 		for (const alg in this) {
@@ -28,7 +45,7 @@ export class Id {
 		if (hint == 'number') {
 			return BigInt('0x' + this.#hex('sha-256').join(''));
 		} else {
-			return this['sha-256'];
+			return btoa_url(this['sha-256']);
 		}
 	}
 }

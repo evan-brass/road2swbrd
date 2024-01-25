@@ -1,6 +1,9 @@
 import { Conn, Sig } from './src/conn.js';
 import { Addr } from './src/addr.js';
 
+const test = new Addr('udp:seed.evan-brass.net');
+console.log(await test.resolve_id());
+
 const cert = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' });
 const config = {
 	iceTransportPolicy: 'relay',
@@ -8,7 +11,7 @@ const config = {
 	certificates: [cert]
 };
 const fork = new Conn(config);
-const username = String((await fork.local).id).replaceAll('/', '_').replaceAll('+', '-');
+const username = String((await fork.local).id);
 const addr = new Addr(`turn:${username}@127.0.0.1?turn_transport=tcp`);
 console.log(addr.href);
 

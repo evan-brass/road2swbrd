@@ -1,11 +1,28 @@
-import { Id } from './id';
-import { Conn } from './conn.js';
+import { Id } from './id.js';
+import { Conn, Sig } from './conn.js';
+import { query_txt } from './dns.js';
 /**
  * Example Addr-esses:
+ * const a = new Addr('udp:seed.evan-brass.net'); await a.resolve_id(); const conn = a.connect();
  * const conn = new Addr('udp:eSfQhc2igaaF_yILi4avPLmpeI6ffxOLB6jr-hvFTJs@example.com').connect();
  * const conn = new Addr('turn:bTKXMJ2yK94aKGWUsbQfNG2RzgG7S5vFgBd-FIzdYXQ@127.0.0.1?turn_transport=tcp').connect();
  */
 export class Addr extends URL {
+	#id;
+	get id() {
+		return this.#id ?? Id.from_str(
+			// Convert the username from url-base64-no-pad to base64-no-pad:
+			this.#authority().username
+		);
+	}
+	async resolve_id() {
+		this.#id ??= this.id;
+		if (this.#id) return this.#id;
+		for await(const s of query_txt(this.#authority().hostname, {prefix: 'swbrd='})) {
+			this.#id ??= Id.from_str(s);
+			if (this.#id) return this.#id;
+		}
+	}
 	#authority() {
 		// Use two URLS to unhide default ports: new URL('https://test.com:443').port == '' and new URL('http://test.com:80').port == ''
 		const http = new URL(this); http.protocol = 'http:';
@@ -31,37 +48,34 @@ export class Addr extends URL {
 		}
 	}
 	sig() {
-		const {username, hostname, port, password: ice_pwd} = this.#authority();
-		const id = new Id(username.replace(/_/g, '/').replace(/-/, '+')); // Convert the username from url-base64-no-pad to base64-no-pad
+		const {hostname, port, password: ice_pwd} = this.#authority();
+		const candidates = [];
+		let setup = this.searchParams.get('setup');
+		let ice_lite;
 		if (/^udp:/i.test(this.protocol)) {
-			return new Sig({
-				id,
-				ice_pwd,
-				candidates: [
-					{address: hostname, port, type: 'host'}
-				],
-				setup: 'passive',
-				ice_lite: true
-			});
+			candidates.push({address: hostname, port, type: 'host'});
+			setup ??= 'passive';
+			ice_lite ??= true;
 		}
 		else if (/^turns?:/i.test(this.protocol)) {
-			return new Sig({
-				id,
-				ice_pwd,
-				candidates: [
-					{address: '255.255.255.255', port: 4666, type: 'host'}
-				],
-				setup: 'active'
-			});
+			candidates.push({address: '255.255.255.255', port: 4666, type: 'host'});
+			setup ??= 'active';
 		}
+		return new Sig({
+			id: this.id,
+			candidates,
+			ice_pwd,
+			setup,
+			ice_lite
+		});
 	}
 	connect(config = null) {
+		if (!this.id) return; // Early return if Addr doesn't have a resolved Id.
+
 		const adjustment = this.config();
 		const ret = new Conn({...config, ...adjustment });
 
-		const sig = this.sig();
-		if (!sig) ret.close();
-		else ret.remote = sig;
+		ret.remote = this.sig();
 
 		return ret;
 	}

@@ -9,8 +9,7 @@ export class Sig {
 	// ice_lite;
 	constructor() { Object.assign(this, ...arguments); }
 	add_sdp(sdp) {
-		this.id ??= new Id();
-		this.id.add_sdp(sdp);
+		this.id ??= Id.from_sdp(sdp);
 		this.ice_ufrag ??= /^a=ice-ufrag:(.+)/im.exec(sdp)[1];
 		this.ice_pwd ??= /^a=ice-pwd:(.+)/im.exec(sdp)[1];
 		this.candidates ??= Array.from(
@@ -87,8 +86,7 @@ export class Conn extends RTCPeerConnection {
 	}
 	async #signaling_task() {
 		const offer = await this.createOffer();
-		const local_id = new Id();
-		local_id.add_sdp(offer.sdp);
+		const local_id = Id.from_sdp(offer.sdp);
 		offer.sdp = offer.sdp.replace(/^a=ice-ufrag:(.+)/im, 'a=ice-ufrag:' + local_id);
 		const ice_pwd = this.#config?.ice_pwd || 'the/ice/password/constant';
 		offer.sdp = offer.sdp.replace(/^a=ice-pwd:(.+)/im, 'a=ice-pwd:' + ice_pwd);
