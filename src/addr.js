@@ -26,8 +26,7 @@ export class Addr extends URL {
 		return { username: http.username, password: http.password, hostname: http.hostname, host, port };
 	}
 	config() {
-		if (/^udp:/i.test(this.protocol)) return null;
-		else if (/^turns?:/i.test(this.protocol)) {
+		if (/^turns?:/i.test(this.protocol)) {
 			const {host} = this.#authority();
 			let transport = this.searchParams.get('turn_transport')
 			transport = (transport == 'udp') ? '' : '?transport=' + transport;
@@ -40,6 +39,7 @@ export class Addr extends URL {
 				}]
 			};
 		}
+		return null;
 	}
 	sig() {
 		const candidates = [];
