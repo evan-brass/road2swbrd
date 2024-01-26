@@ -9,19 +9,13 @@ import { query_txt } from './dns.js';
  */
 export class Addr extends URL {
 	#id;
-	get id() {
-		return this.#id ?? Id.from_str(
-			// Convert the username from url-base64-no-pad to base64-no-pad:
-			this.#authority().username
-		);
-	}
 	async resolve_id() {
-		this.#id ??= this.id;
-		if (this.#id) return this.#id;
-		for await(const s of query_txt(this.#authority().hostname, {prefix: 'swbrd='})) {
-			this.#id ??= Id.from_str(s);
-			if (this.#id) return this.#id;
+		const {username} = this.#authority();
+		this.#id ??= Id.from_str(username);
+		for await (const txt of query_txt(this.#authority().hostname, {prefix: 'swbrd='})) {
+			this.#id ??= Id.from_str(txt);
 		}
+		return this.#id;
 	}
 	#authority() {
 		// Use two URLS to unhide default ports: new URL('https://test.com:443').port == '' and new URL('http://test.com:80').port == ''
@@ -48,8 +42,9 @@ export class Addr extends URL {
 		}
 	}
 	sig() {
-		const {hostname, port, password: ice_pwd} = this.#authority();
 		const candidates = [];
+		const {hostname, port, username, password: ice_pwd} = this.#authority();
+		const id = this.#id ?? Id.from_str(username);
 		let setup = this.searchParams.get('setup');
 		let ice_lite;
 		if (/^udp:/i.test(this.protocol)) {
@@ -62,7 +57,7 @@ export class Addr extends URL {
 			setup ??= 'active';
 		}
 		return new Sig({
-			id: this.id,
+			id,
 			candidates,
 			ice_pwd,
 			setup,
@@ -70,8 +65,6 @@ export class Addr extends URL {
 		});
 	}
 	connect(config = null) {
-		if (!this.id) return; // Early return if Addr doesn't have a resolved Id.
-
 		const adjustment = this.config();
 		const ret = new Conn({...config, ...adjustment });
 		
