@@ -18,7 +18,6 @@ export class Sig {
 				return {priority: parseInt(priority), address, port: parseInt(port), type}
 			}
 		);
-		this.candidates.sort(({priority: a}, {priority: b}) => b - a);
 	}
 	*sdp(polite) {
 		yield* this.id.sdp();

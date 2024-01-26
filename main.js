@@ -38,14 +38,25 @@ import { Addr } from './src/addr.js';
 
 // const incoming = addr.connect();
 
-const a = new Conn();
-const b = new Conn();
-const siga = await a.local;
-const sigb = await b.local;
-console.log(siga);
-console.log(sigb);
-a.remote = sigb;
-b.remote = siga;
+const cert = await Conn.generateCertificate();
+const listener = await new Addr('bind:0.0.0.0').bind_forking({ certificates: [cert] });
+(async () => {
+	for await (const answer of listener) {
+		console.log('answer', answer);
+	}
+})();
+const addr = listener.addr;
+console.log(addr);
+const call = addr.connect();
+console.log('call', call);
 
-await new Promise(res => setTimeout(res, 5000));
-a.restartIce();
+// const a = new Conn();
+// const b = new Conn();
+// const siga = await a.local;
+// const sigb = await b.local;
+// console.log(siga);
+// console.log(sigb);
+// a.remote = sigb;
+// b.remote = siga;
+// await new Promise(res => setTimeout(res, 5000));
+// a.restartIce();
