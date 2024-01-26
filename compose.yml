@@ -1,0 +1,6 @@
+services:
+  coturn:
+    build: ./coturn
+    ports:
+      - 3478:3478/tcp
+      - 3478:3478/udp

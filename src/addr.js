@@ -28,14 +28,14 @@ export class Addr extends URL {
 	config() {
 		if (/^turns?:/i.test(this.protocol)) {
 			const {host} = this.#authority();
-			let transport = this.searchParams.get('turn_transport')
+			let transport = this.searchParams.get('turn_transport') || 'tcp';
 			transport = (transport == 'udp') ? '' : '?transport=' + transport;
 			return {
 				iceTransportPolicy: 'relay',
 				iceServers: [{
 					urls: `${this.protocol}${host}${transport}`,
-					username: this.searchParams.get('turn_username') || 'the/turn/username/constant',
-					credential: this.searchParams.get('turn_credential') || 'the/turn/credential/constant'
+					username: this.searchParams.get('turn_username') || 'guest',
+					credential: this.searchParams.get('turn_credential') || 'the/guest/turn/credential/constant'
 				}]
 			};
 		}
