@@ -74,6 +74,12 @@ export class Addr extends URL {
 
 		const adjustment = this.config();
 		const ret = new Conn({...config, ...adjustment });
+		
+		// If we asjusted the config, then perform a fixup later.
+		if (adjustment) ret.local.then(() => {
+			ret.setConfiguration(config);
+			ret.restartIce();
+		});
 
 		ret.remote = this.sig();
 

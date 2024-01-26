@@ -48,14 +48,14 @@ export class Sig {
 	}
 }
 
-export const config_default = {
+export const default_configuration = {
 	iceServers: [{urls: 'stun:global.stun.twilio.com'}]
 };
 export class Conn extends RTCPeerConnection {
 	#config;
 	#dc = this.createDataChannel('', {negotiated: true, id: 0});
 	constructor(config = null) {
-		super({ ...config_default, ...config});
+		super({ ...default_configuration, ...config});
 		this.#config = config;
 		this.#dc.addEventListener('open', () => console.log('Connected!'));
 		this.#signaling_task();
@@ -85,20 +85,86 @@ export class Conn extends RTCPeerConnection {
 		return {type, sdp};
 	}
 	async #signaling_task() {
-		const offer = await this.createOffer();
+		const offer = await super.createOffer();
 		const local_id = Id.from_sdp(offer.sdp);
-		offer.sdp = offer.sdp.replace(/^a=ice-ufrag:(.+)/im, 'a=ice-ufrag:' + local_id);
-		const ice_pwd = this.#config?.ice_pwd || 'the/ice/password/constant';
-		offer.sdp = offer.sdp.replace(/^a=ice-pwd:(.+)/im, 'a=ice-pwd:' + ice_pwd);
+		
+		// Mung the offer
+		offer.sdp = offer.sdp.replace(/^a=ice-ufrag:(.+)/im, `a=ice-ufrag:${this.#config?.ice_ufrag || local_id}`);
+		offer.sdp = offer.sdp.replace(/^a=ice-pwd:(.+)/im, `a=ice-pwd:${this.#config?.ice_pwd || 'the/ice/password/constant'}`);
+		
 		await super.setLocalDescription(offer);
+		// TODO: If browsers remove the ability to mung ice credentials then we'll need to add a fallback.
 
+		// Prepare for renegotiation
+		let negotiation_needed = false; this.addEventListener('negotiationneeded', () => negotiation_needed = true);
+		this.#dc.addEventListener('message', async ({ data }) => { try {
+			const { candidate } = JSON.parse(data);
+			if (candidate) await this.addIceCandidate(candidate);
+		} catch {}});
+		this.addEventListener('icecandidate', ({candidate}) => {
+			if (candidate && this.#dc.readyState == 'open') {
+				this.#dc.send(JSON.stringify({ candidate }));
+			}
+		});
+		let remote_desc = false; this.#dc.addEventListener('message', ({data}) => { try {
+			const { description } = JSON.parse(data);
+			if (description) remote_desc = description;
+		} catch {}})
+
+		// Spawn a task to deliver our local signaling message once icegathering completes
 		while (this.iceGatheringState != 'complete') await new Promise(res => this.addEventListener('icegatheringstatechange', res, {once: true}));
-		const local = new Sig({ id: local_id, ice_ufrag: '', ice_pwd: this.#config?.ice_pwd ?? '' });
+		const local = new Sig({ id: local_id, ice_ufrag: this.#config?.ice_ufrag || '', ice_pwd: this.#config?.ice_pwd ?? '' });
 		local.add_sdp(this.localDescription.sdp);
 		this.#local_res(local);
 
+		// Finish the initial round of signaling
 		const remote = await this.#remote;
-		const polite = local.id < remote.id;
+		const polite = local_id < remote.id;
 		await super.setRemoteDescription(this.#desc(remote, polite));
+
+		// Switchover into handling renegotiation
+		while (1) {
+			if (['closing', 'closed'].includes(this.#dc.readyState)) { break; }
+			else if (this.#dc.readyState == 'connecting') {
+				await new Promise(res => this.#dc.addEventListener('open', res, {once: true}));
+			}
+			else if (negotiation_needed) {
+				negotiation_needed = false;
+				await super.setLocalDescription();
+				try { this.#dc.send(JSON.stringify({ description: this.localDescription })); } catch {}
+			}
+			else if (remote_desc) {
+				const desc = remote_desc; remote_desc = false;
+				// Ignore incoming offers if we have a local offer and are also impolite
+				if (desc?.type == 'offer' && this.signalingState == 'have-local-offer' && !polite) continue;
+
+				await super.setRemoteDescription(desc);
+
+				if (desc?.type == 'offer') negotiation_needed = true; // Call setLocalDescription.
+			}
+			else {
+				// Wait for something to happen
+				await new Promise(res => {
+					this.addEventListener('negotiationneeded', res, {once: true});
+					this.#dc.addEventListener('message', res, {once: true});
+					this.#dc.addEventListener('close', res, {once: true});
+				});
+			}
+		}
+	}
+
+	// Disable manual signaling because we provide automatic renegotiation over #dc
+	createOffer() { throw new Error("Manual signaling disabled."); }
+	createAnswer() { throw new Error("Manual signaling disabled."); }
+	setLocalDescription() { throw new Error("Manual signaling disabled."); }
+	setRemoteDescription() { throw new Error("Manual signaling disabled."); }
+
+	// Generate a certificate with a sha-256 fingerprint as required by Id
+	static generateCertificate() {
+		return super.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' });
+	}
+	// Add our default config even when using setConfiguration
+	setConfiguration(config = null) {
+		super.setConfiguration({ ...default_configuration, ...config });
 	}
 }
