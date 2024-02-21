@@ -57,10 +57,11 @@ export class Cert extends RTCCertificate {
 			Number(idf),
 			BigInt('0x' + fingerprint.split(':').join(''))
 		);
+		Object.freeze(ret);
 
 		return ret;
 	}
-	static async load() {
+	static async load(key = import.meta.url) {
 		function wrap(req) {
 			return new Promise((res, rej) => {
 				req.onsuccess = () => res(req.result);
@@ -79,7 +80,7 @@ export class Cert extends RTCCertificate {
 
 		const trans = db.transaction('certs', 'readwrite');
 		const certs = trans.objectStore('certs');
-		const cursor_req = certs.openCursor(import.meta.url);
+		const cursor_req = certs.openCursor(key);
 		let cursor;
 		while (cursor = await wrap(cursor_req)) {
 			const { cert, id, algorithm } = cursor.value;
@@ -92,6 +93,7 @@ export class Cert extends RTCCertificate {
 			else {
 				Object.setPrototypeOf(cert, this.prototype);
 				cert.id = id;
+				Object.freeze(cert);
 				return cert;
 			}
 		}
@@ -99,12 +101,13 @@ export class Cert extends RTCCertificate {
 			cert: candidate,
 			id: candidate.id,
 			algorithm: String(idf)
-		}, import.meta.url));
+		}, key));
 
 		return candidate;
 	}
-	[Symbol.toPrimitive]() {
-		return this.id;
+	[Symbol.toPrimitive](hint) {
+		if (hint == 'number') return this.id;
+		return this.toString();
 	}
 }
 
