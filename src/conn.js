@@ -22,21 +22,39 @@ export class Conn extends RTCPeerConnection {
 		const polite = BigInt(cert) < peerid;
 		const {
 			setup = polite ? 'active' : 'passive',
-			ice_lite = false,
-			ice_pwd = 'the/ice/password/constant'
-			// TODO: Add candidates?
+			ice_lite,
+			ice_pwd,
+			candidates = []
 		} = config ?? {};
 
 		this.#signaling_task({
 			cert, polite, peerid,
-			setup, ice_lite, ice_pwd
-		});
+			setup, ice_lite, ice_pwd, candidates
+		}).catch(() => this.close());
 	}
 	static async generateCertificate() {
 		return await super.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' });
 	}
 
-	async #signaling_task(/* Session: */ { cert, peerid, polite, setup, ice_lite, ice_pwd }) {
+	async addIceCandidate(input) {
+		let candidate;
+		if (typeof input == 'string') {
+			candidate = 'candidate:' + input;
+		}
+		else if (typeof input == 'object') {
+			candidate = input?.candidate;
+		}
+		candidate ||= `candidate:${input?.foundation || 'foundation'} ${input?.component || '0'} ${input?.transport || 'udp'} ${input?.priority || '42'} ${input?.address} ${input?.port || '3478'} typ ${input?.typ || 'host'}`;
+		return await super.addIceCandidate({
+			candidate,
+			sdpMid: input?.sdpMid ?? 'dc',
+			sdpMLineIndex: input?.sdpMLineIndex
+		});
+	}
+
+	async #signaling_task(/* Session: */ { cert, peerid, polite, setup, ice_lite, ice_pwd, candidates }) {
+		ice_pwd ||= 'the/ice/password/constant';
+
 		// Prepare for renegotiation
 		let negotiation_needed = false; this.addEventListener('negotiationneeded', () => negotiation_needed = true);
 		this.#dc.addEventListener('message', async ({ data }) => { try {
@@ -55,7 +73,7 @@ export class Conn extends RTCPeerConnection {
 
 		// First pass of signaling
 		const fingerprint = idf.fingerprint(peerid);
-		const ice_ufrag = idf.toString(peerid);
+		const ice_ufrag = idf.toString(peerid).padStart(6, '0');
 		await super.setRemoteDescription({ type: 'offer', sdp: [
 			'v=0',
 			'o=swbrd 42 0 IN IP4 0.0.0.0',
@@ -66,7 +84,7 @@ export class Conn extends RTCPeerConnection {
 			`a=ice-ufrag:${ice_ufrag}`,
 			`a=ice-pwd:${ice_pwd}`,
 			'a=ice-options:trickle',
-			...(ice_lite ? ['a=ice-lite'] : []),
+			...(ice_lite != undefined ? ['a=ice-lite'] : []),
 			'm=application 42 UDP/DTLS/SCTP webrtc-datachannel',
 			'c=IN IP4 0.0.0.0',
 			'a=mid:dc',
@@ -78,7 +96,11 @@ export class Conn extends RTCPeerConnection {
 		answer.sdp = answer.sdp
 			.replace(/^a=ice-ufrag:.+/im, `a=ice-ufrag:${idf.toString(cert)}`)
 			.replace(/^a=ice-pwd:.+/im, `a=ice-pwd:${ice_pwd}`);
-		// TODO: Anything else that we need to mung?
+
+		// Add any initial candidates
+		for (const c of candidates) {
+			await this.addIceCandidate(c);
+		}
 
 		await super.setLocalDescription(answer);
 
