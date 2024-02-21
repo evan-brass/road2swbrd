@@ -1,45 +1,12 @@
 import {base58} from './src/base58.js';
-import { Cert, idf } from './src/cert.js';
-console.log(Cert, idf);
+import { cert as certa } from './src/cert.js?peera';
+import { cert as certb } from './src/cert.js?peerb'
+
+console.log(certa, certb);
 
 export const defaults = {
 	iceServers: [{urls: 'stun:global.stun.twilio.com'}]
 };
-
-const known_ids = new WeakMap();
-export async function get_id(cert = null, conn = null) {
-	const known = known_ids.get(cert);
-	if (known) return known;
-	
-	// If the cert has getFingerprints then use that
-	let fingerprint;
-	if (cert?.getFingerprints) {
-		for (const {algorithm, value} of cert.getFingerprints()) {
-			if (algorithm.toLowerCase() == 'sha-256') {
-				fingerprint = value;
-				break;
-			}
-		}
-	}
-
-	// Otherwise use a peer connection (the one provided or a temporary one)
-	if (!fingerprint) {
-		const pc = conn ?? new RTCPeerConnection({ certificates: [cert] });
-		if (!conn) pc.createDataChannel('');
-		const offer = await pc.createOffer();
-		fingerprint = /^a=fingerprint:sha-256 (.+)/im.exec(offer.sdp)?.[1];
-		if (!conn) pc.close();
-	}
-
-
-	if (!fingerprint) return 0n;
-	const id = BigInt('0x' + fingerprint.split(':').join(''));
-
-	// Insert the id into the known_ids (if the cert was provided)
-	if (cert instanceof RTCCertificate) known_ids.set(cert, id);
-
-	return id;
-}
 
 export class Conn extends RTCPeerConnection {
 	#dc = this.createDataChannel('', {negotiated: true, id: 0});
@@ -151,13 +118,9 @@ export class Conn extends RTCPeerConnection {
 	}
 }
 
-const certa = await Conn.generateCertificate();
-const certb = await Conn.generateCertificate();
-const ida = await get_id(certa);
-const idb = await get_id(certb);
 
-const a = new Conn({ pid: idb, cert: certa });
-const b = new Conn({ pid: ida, cert: certb });
+const a = new Conn({ pid: BigInt(certa), cert: certa });
+const b = new Conn({ pid: BigInt(certb), cert: certb });
 // console.log(a.addTransceiver('audio'));
 
 a.addEventListener('icecandidate', ({ candidate }) => b.addIceCandidate(candidate));

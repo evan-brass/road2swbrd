@@ -10,13 +10,13 @@ export function base58(input) {
 		}
 		return ret;
 	}
-	else if (typeof input == 'bigint') {
+	else {
+		input = BigInt(input);
 		ret = '';
 		while (input > 0n) {
 			ret += charset.charAt(Number(input % 58n));
 			input /= 58n;
 		}
 	}
-	else { throw new Error("base58 swaps string <-> bigint"); }
 	return ret;
 }
