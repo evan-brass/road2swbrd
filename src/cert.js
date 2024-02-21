@@ -12,7 +12,7 @@ export const idf = new class IdFingerprint {
 		return base58(BigInt(id));
 	}
 	fromString(s) {
-		return base58(String(s));
+		return BigInt.asUintN(this, base58(String(s)));
 	}
 	fingerprint(id) {
 		return `${this.algorithm} ${BigInt(id).toString(16).padStart(2 * this.bytes, '0').replace(/[0-9a-f]{2}/ig, ':$&').slice(1)}`;
