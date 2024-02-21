@@ -1,5 +1,4 @@
-import { base58 } from './base58.js';
-import { cert as default_cert } from './cert.js';
+import { cert as default_cert, idf } from './cert.js';
 
 export const defaults = {
 	iceServers: [{urls: 'stun:global.stun.twilio.com'}]
@@ -55,15 +54,15 @@ export class Conn extends RTCPeerConnection {
 		} catch {}})
 
 		// First pass of signaling
-		const fingerprint = peerid.toString(16).padStart(64, '0').replace(/[0-9a-f]{2}/ig, ':$&').slice(1);
-		const ice_ufrag = base58(peerid);
+		const fingerprint = idf.fingerprint(peerid);
+		const ice_ufrag = idf.toString(peerid);
 		await super.setRemoteDescription({ type: 'offer', sdp: [
 			'v=0',
 			'o=swbrd 42 0 IN IP4 0.0.0.0',
 			's=-',
 			't=0 0',
 			'a=group:BUNDLE dc',
-			`a=fingerprint:sha-256 ${fingerprint}`,
+			`a=fingerprint:${fingerprint}`,
 			`a=ice-ufrag:${ice_ufrag}`,
 			`a=ice-pwd:${ice_pwd}`,
 			'a=ice-options:trickle',
@@ -77,7 +76,7 @@ export class Conn extends RTCPeerConnection {
 		].join('\n') });
 		const answer = await super.createAnswer();
 		answer.sdp = answer.sdp
-			.replace(/^a=ice-ufrag:.+/im, `a=ice-ufrag:${base58(cert)}`)
+			.replace(/^a=ice-ufrag:.+/im, `a=ice-ufrag:${idf.toString(cert)}`)
 			.replace(/^a=ice-pwd:.+/im, `a=ice-pwd:${ice_pwd}`);
 		// TODO: Anything else that we need to mung?
 

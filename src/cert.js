@@ -1,13 +1,23 @@
+import { base58 } from './base58.js';
 
 export const idf = new class IdFingerprint {
 	algorithm;
-	bits;
+	bytes;
 	constructor() { Object.assign(this, ...arguments); }
 	[Symbol.toPrimitive](hint) {
-		if (hint == 'number') return this.bits;
+		if (hint == 'number') return 8 * this.bytes;
 		else return this.algorithm;
 	}
-}({ algorithm: 'sha-256', bits: 256 });
+	toString(id) {
+		return base58(BigInt(id));
+	}
+	fromString(s) {
+		return base58(String(s));
+	}
+	fingerprint(id) {
+		return `${this.algorithm} ${BigInt(id).toString(16).padStart(2 * this.bytes, '0').replace(/[0-9a-f]{2}/ig, ':$&').slice(1)}`;
+	}
+}({ algorithm: 'sha-256', bytes: 32 });
 
 export class Cert extends RTCCertificate {
 	id;
