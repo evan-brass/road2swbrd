@@ -1,16 +1,53 @@
 import {base58} from './src/base58.js';
 
-
 export const defaults = {
 	iceServers: [{urls: 'stun:global.stun.twilio.com'}]
 };
 
+const known_ids = new WeakMap();
+export async function get_id(cert = null, conn = null) {
+	const known = known_ids.get(cert);
+	if (known) return known;
+	
+	// If the cert has getFingerprints then use that
+	let fingerprint;
+	if (cert?.getFingerprints) {
+		for (const {algorithm, value} of cert.getFingerprints()) {
+			if (algorithm.toLowerCase() == 'sha-256') {
+				fingerprint = value;
+				break;
+			}
+		}
+	}
+
+	// Otherwise use a peer connection (the one provided or a temporary one)
+	if (!fingerprint) {
+		const pc = conn ?? new RTCPeerConnection({ certificates: [cert] });
+		if (!conn) pc.createDataChannel('');
+		const offer = await pc.createOffer();
+		fingerprint = /^a=fingerprint:sha-256 (.+)/im.exec(offer.sdp)?.[1];
+		if (!conn) pc.close();
+	}
+
+
+	if (!fingerprint) return 0n;
+	const id = BigInt('0x' + fingerprint.split(':').join(''));
+
+	// Insert the id into the known_ids (if the cert was provided)
+	if (cert instanceof RTCCertificate) known_ids.set(cert, id);
+
+	return id;
+}
+
 export class Conn extends RTCPeerConnection {
 	#dc = this.createDataChannel('', {negotiated: true, id: 0});
 	constructor(config) {
+		if (config?.certificates?.length > 1) throw new Error("You may only provide 1 certificate.");
+		const cert = config?.cert ?? config?.certificates?.[0] ?? cert;
 		super({
 			...defaults,
 			...config,
+			certificates: [cert],
 			bundlePolicy: 'max-bundle',
 			rtcpMuxPolicy: 'require',
 			peerIdentity: null,
@@ -18,14 +55,40 @@ export class Conn extends RTCPeerConnection {
 
 		this.#signaling_task(config);
 	}
+	static async generateCertificate() {
+		return await super.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' });
+	}
 
-	async #signaling_task({
-		lpid, pid,
-		polite = lpid < pid,
-		setup = polite ? 'active' : 'passive',
-		ice_lite = false,
-		ice_pwd = 'the/ice/password/constant'
-	} = {}) {
+	async #signaling_task(config) {
+		const {
+			pid,
+			lpid = await get_id(
+				config?.cert ?? config?.certificates?.[0],
+				this
+			),
+			polite = lpid < pid,
+			setup = polite ? 'active' : 'passive',
+			ice_lite = false,
+			ice_pwd = 'the/ice/password/constant'
+		} = config ?? {};
+		
+		// Prepare for renegotiation
+		let negotiation_needed = false; this.addEventListener('negotiationneeded', () => negotiation_needed = true);
+		this.#dc.addEventListener('message', async ({ data }) => { try {
+			const { candidate } = JSON.parse(data);
+			if (candidate) await this.addIceCandidate(candidate);
+		} catch {}});
+		this.addEventListener('icecandidate', ({candidate}) => {
+			if (candidate && this.#dc.readyState == 'open') {
+				this.#dc.send(JSON.stringify({ candidate }));
+			}
+		});
+		let remote_desc = false; this.#dc.addEventListener('message', ({data}) => { try {
+			const { description } = JSON.parse(data);
+			if (description) remote_desc = description;
+		} catch {}})
+
+		// First pass of signaling
 		const fingerprint = pid.toString(16).padStart(64, '0').replace(/[0-9a-f]{2}/ig, ':$&').slice(1);
 		const ice_ufrag = base58(pid);
 		await super.setRemoteDescription({ type: 'offer', sdp: [
@@ -54,66 +117,46 @@ export class Conn extends RTCPeerConnection {
 
 		await super.setLocalDescription(answer);
 
-		// TODO: switchover to perfect negotiation
-	}
-}
+		// Switchover into handling renegotiation
+		while (1) {
+			if (['closing', 'closed'].includes(this.#dc.readyState)) { break; }
+			else if (this.#dc.readyState == 'connecting') {
+				await new Promise(res => this.#dc.addEventListener('open', res, {once: true}));
+			}
+			else if (negotiation_needed) {
+				negotiation_needed = false;
+				await super.setLocalDescription();
+				try { this.#dc.send(JSON.stringify({ description: this.localDescription })); } catch {}
+			}
+			else if (remote_desc) {
+				const desc = remote_desc; remote_desc = false;
+				// Ignore incoming offers if we have a local offer and are also impolite
+				if (desc?.type == 'offer' && this.signalingState == 'have-local-offer' && !polite) continue;
 
-export class Cert extends RTCCertificate {
-	id;
-	static async generate(params = { name: 'ECDSA', namedCurve: 'P-256' }) {
-		const ret = await RTCPeerConnection.generateCertificate(params);
-		Object.setPrototypeOf(ret, this.prototype);
+				await super.setRemoteDescription(desc);
 
-		// Try to get the id using getFingerprints
-		let fingerprint;
-		if ('getFingerprints' in ret) {
-			for (const {algorithm, value} of ret.getFingerprints()) {
-				if (algorithm.toLowerCase() == 'sha-256') {
-					fingerprint = value;
-					break;
-				}
+				if (desc?.type == 'offer') negotiation_needed = true; // Call setLocalDescription.
+			}
+			else {
+				// Wait for something to happen
+				await new Promise(res => {
+					this.addEventListener('negotiationneeded', res, {once: true});
+					this.#dc.addEventListener('message', res, {once: true});
+					this.#dc.addEventListener('close', res, {once: true});
+				});
 			}
 		}
-
-		// Otherwise use a temporary connection using the certificate
-		if (!fingerprint) {
-			const temp = new RTCPeerConnection({ certificates: [ret] });
-			temp.createDataChannel('');
-			const offer = await temp.createOffer();
-			fingerprint = /^a=fingerprint:sha-256 (.+)/im.exec(offer.sdp)?.[1];
-			temp.close();
-		}
-
-		if (!fingerprint) throw new Error("Failed to get the sha-256 fingerprint for the generated certificate");
-		ret.id = BigInt('0x' + fingerprint.split(':').join(''));
-		
-		return ret;
-	}
-	connect(pid, config = null) {
-		const ret = new Conn({
-			...config,
-			lpid: this.id,
-			pid: BigInt(pid),
-			certificates: [this]
-		});
-
-		return ret;
 	}
 }
 
-const certa = await Cert.generate({
-	name: 'ECDSA',
-	namedCurve: 'P-256'
-});
-const certb = await Cert.generate({
-	name: "RSASSA-PKCS1-v1_5",
-	modulusLength: 2048,
-	publicExponent: new Uint8Array([1, 0, 1]),
-	hash: "SHA-256",
-});
+const certa = await Conn.generateCertificate();
+const certb = await Conn.generateCertificate();
+const ida = await get_id(certa);
+const idb = await get_id(certb);
 
-const a = certa.connect(certb.id);
-const b = certb.connect(certa.id);
+const a = new Conn({ pid: idb, cert: certa });
+const b = new Conn({ pid: ida, cert: certb });
+// console.log(a.addTransceiver('audio'));
 
 a.addEventListener('icecandidate', ({ candidate }) => b.addIceCandidate(candidate));
 b.addEventListener('icecandidate', ({ candidate }) => a.addIceCandidate(candidate));
