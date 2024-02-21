@@ -1,4 +1,6 @@
 import {base58} from './src/base58.js';
+import { Cert, idf } from './src/cert.js';
+console.log(Cert, idf);
 
 export const defaults = {
 	iceServers: [{urls: 'stun:global.stun.twilio.com'}]
