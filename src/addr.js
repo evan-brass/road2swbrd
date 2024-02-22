@@ -19,8 +19,8 @@ export class Addr extends URL {
 	}
 	#authority() {
 		// Use two URLS to unhide default ports: new URL('https://test.com:443').port == '' and new URL('http://test.com:80').port == ''
-		const http = new URL(this); http.protocol = 'http:';
-		const https = new URL(this); https.protocol = 'https:';
+		const http = new URL(this.href.replace(/^[^:]+:/, 'http:'));
+		const https = new URL(this.href.replace(/^[^:]+:/, 'https:'));
 		const host = (http.host.length < https.host.length) ? https.host : http.host;
 		const port = parseInt(http.port || https.port || 3478);
 		return { username: http.username, password: http.password, hostname: http.hostname, host, port };
