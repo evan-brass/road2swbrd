@@ -10,9 +10,9 @@ import { query_txt } from './dns.js';
 export class Addr extends URL {
 	#id;
 	async resolve_id() {
-		const {username} = this.#authority();
+		const {username, hostname} = this.#authority();
 		this.#id ??= idf.fromString(username);
-		for await (const txt of query_txt(this.#authority().hostname, {prefix: `swbrd(${idf.algorithm})=`})) {
+		for await (const txt of query_txt(hostname, {prefix: `swbrd(${idf.algorithm})=`})) {
 			this.#id ??= idf.fromString(txt);
 		}
 		return this.#id;
