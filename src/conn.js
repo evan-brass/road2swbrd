@@ -21,10 +21,10 @@ export class Conn extends RTCPeerConnection {
 
 		const polite = BigInt(cert) < peerid;
 		const {
-			setup = polite ? 'active' : 'passive',
+			setup,
 			ice_lite,
 			ice_pwd,
-			candidates = []
+			candidates
 		} = config ?? {};
 
 		this.#signaling_task({
@@ -36,24 +36,15 @@ export class Conn extends RTCPeerConnection {
 		return await super.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' });
 	}
 
-	async addIceCandidate(input) {
-		let candidate;
-		if (typeof input == 'string') {
-			candidate = 'candidate:' + input;
-		}
-		else if (typeof input == 'object') {
-			candidate = input?.candidate;
-		}
-		candidate ||= `candidate:${input?.foundation || 'foundation'} ${input?.component || '0'} ${input?.transport || 'udp'} ${input?.priority || '42'} ${input?.address} ${input?.port || '3478'} typ ${input?.typ || 'host'}`;
-		return await super.addIceCandidate({
-			candidate,
-			sdpMid: input?.sdpMid ?? 'dc',
-			sdpMLineIndex: input?.sdpMLineIndex
-		});
+	async addIceCandidate(candidate) {
+		candidate.sdpMid ??= 'dc';
+		return await super.addIceCandidate(candidate);
 	}
 
 	async #signaling_task(/* Session: */ { cert, peerid, polite, setup, ice_lite, ice_pwd, candidates }) {
 		ice_pwd ||= 'the/ice/password/constant';
+		setup ||= polite ? 'active' : 'passive';
+		candidates ||= [];
 
 		// Prepare for renegotiation
 		let negotiation_needed = false; this.addEventListener('negotiationneeded', () => negotiation_needed = true);
@@ -96,13 +87,12 @@ export class Conn extends RTCPeerConnection {
 		answer.sdp = answer.sdp
 			.replace(/^a=ice-ufrag:.+/im, `a=ice-ufrag:${idf.toString(cert)}`)
 			.replace(/^a=ice-pwd:.+/im, `a=ice-pwd:${ice_pwd}`);
+		await super.setLocalDescription(answer);
 
 		// Add any initial candidates
-		for (const c of candidates) {
-			await this.addIceCandidate(c);
+		for (const candidate of candidates) {
+			await this.addIceCandidate(candidate);
 		}
-
-		await super.setLocalDescription(answer);
 
 		// Switchover into handling renegotiation
 		while (1) {

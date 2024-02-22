@@ -44,6 +44,7 @@ export class Addr extends URL {
 	connect(config = null) {
 		const {hostname, port, username, password: ice_pwd} = this.#authority();
 		this.#id ??= idf.fromString(username);
+		if (!this.#id) return;
 		const candidates = this.searchParams.getAll('candidate').map(s => {
 			s = decodeURIComponent(s);
 			try { return JSON.parse(s); }
@@ -53,12 +54,16 @@ export class Addr extends URL {
 		let ice_lite = this.searchParams.get('ice_lite');
 
 		if (/^udp:/i.test(this.protocol)) {
-			candidates.push({address: hostname, port, type: 'host'});
+			candidates.push({
+				candidate: `candidate:foundation 1 udp 42 ${hostname} ${port} typ host`
+			});
 			setup ??= 'passive';
 			ice_lite ??= true;
 		}
 		else if (/^turns?:/i.test(this.protocol)) {
-			if (candidates.length < 1) candidates.push({address: '255.255.255.255', port: 3478, type: 'relay'});
+			if (candidates.length < 1) candidates.push({
+				candidate: `candidate:foundation 1 udp 42 255.255.255.255 3478 typ relay`
+			});
 		}
 
 		const ret = new Conn(this.#id, {
