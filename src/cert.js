@@ -70,7 +70,7 @@ export class Cert extends RTCCertificate {
 				req.onerror = () => rej(req.error);
 			});
 		}
-		const openreq = indexedDB.open('swbrd-certs', 1);
+		const openreq = indexedDB.open('swbrd', 1);
 		openreq.onupgradeneeded = ({oldVersion, newVersion, target: {result: db}}) => {
 			db.createObjectStore('certs');
 		};
